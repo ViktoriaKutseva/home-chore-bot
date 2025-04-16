@@ -4,8 +4,8 @@ from typing import List
 
 from loguru import logger
 import sqlalchemy
-from sqlalchemy import Column, DateTime, Integer, String, create_engine, exists
-from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import Column, DateTime, Integer, String, create_engine, exists, ForeignKey
+from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 
 from enums.complexity import Complexity
 from enums.frequency import Frequency
@@ -35,6 +35,18 @@ class TaskSent(Base):
     __tablename__ = 'sent_tasks'
     id = Column(Integer, primary_key=True)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    
+class PreviousAssignment(Base):
+    __tablename__ = 'tasks_history'
+
+    id = Column(Integer, primary_key=True)
+    date = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+    
+    person_id = Column(Integer, ForeignKey('persons.id'), nullable=False)
+    chore_id = Column(Integer, ForeignKey('chores.id'), nullable=False)
+
+    person = relationship("Person")
+    chore = relationship("Chore")
 
 class DBClient:
     def __init__(

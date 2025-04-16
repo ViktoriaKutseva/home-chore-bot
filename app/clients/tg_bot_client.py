@@ -4,7 +4,7 @@ from loguru import logger
 from telegram.ext import Application, CommandHandler, ContextTypes, ConversationHandler, CallbackQueryHandler, MessageHandler, filters
 from telegram import BotCommand, Update, InlineKeyboardButton, InlineKeyboardMarkup
 
-from clients.db_client import  Chore, Person, DBClient, TaskSent
+from clients.db_client import  Chore, Person, DBClient, TaskSent, PreviousAssignment
 from enums.complexity import Complexity
 from enums.frequency import Frequency
 from logic.assing_by_date import ChoreDistributionService
@@ -144,7 +144,7 @@ class TgBotClient:
 
         application.job_queue.run_repeating(
             callback=self._check_and_send_tasks, 
-            interval=timedelta(hours=3),
+            interval=timedelta(hours=2),
             first=time(hour=0, minute=0, tzinfo=timezone.utc),
             name="check_and_send_tasks"
         )
@@ -180,47 +180,72 @@ class TgBotClient:
         """Распределяет и отправляет пользователям их задачи каждый день."""
         logger.info("Sending today's tasks")
 
+        # Открываем сессию с помощью DBClient
         session = self.db_client._sessionmaker()
-        persons = session.query(Person).all()
-        all_chores = session.query(Chore).all()
-        session.close()
 
-        if not persons or not all_chores:
-            logger.warning("No users or tasks to send.")
-            return
+        try:
+            persons = session.query(Person).all()
+            all_chores = session.query(Chore).all()
 
-        chore_service = ChoreDistributionService()
-        today_chores = chore_service.get_chores_due_today(all_chores)
+            if not persons or not all_chores:
+                logger.warning("No users or tasks to send.")
+                return
 
-        if not today_chores:
-            logger.info("No tasks today.")
-            return
+            today_chores = self.chore_service.get_chores_due_today(all_chores)
 
-        tasks_by_person = chore_service.assign_tasks(today_chores, persons)
+            if not today_chores:
+                logger.info("No tasks today.")
+                return
 
-        for entry in tasks_by_person:
-            person = entry["person"]
-            tasks = entry["tasks"]
+            tasks_by_person = self.chore_service.assign_tasks(today_chores, persons, db_session=session)
 
-            try:
-                chat = await context.bot.get_chat(person.tg_user_id)
-                user_display_name = f"@{chat.username}" if chat.username else chat.first_name
-            except Exception as e:
-                logger.error(f"Couldn't get users name {person.tg_user_id}: {e}")
-                user_display_name = f"ID {person.tg_user_id}" 
+            today = datetime.now(timezone.utc).date()
 
-            if tasks:
-                task_list = "\n".join([f"- {task['name']} (Сложность: {task['complexity']})" for task in tasks])
-                message = f"👋 {user_display_name}, вот твои задачи на сегодня:\n{task_list}"
-            else:
-                message = f"🎉 {user_display_name}, у тебя сегодня нет задач!"
+            for entry in tasks_by_person:
+                person = entry["person"]
+                tasks = entry["tasks"]
 
-            try:
-                await context.bot.send_message(chat_id=person.tg_user_id, text=message)
-                logger.info(f"Tasks has been sent {user_display_name}")
-            except Exception as e:
-                logger.error(f"Couldn't send tasks {person.tg_user_id}: {e}")
-            
+                # 💌 Генерация имени
+                try:
+                    chat = await context.bot.get_chat(person.tg_user_id)
+                    user_display_name = f"@{chat.username}" if chat.username else chat.first_name
+                except Exception as e:
+                    logger.error(f"Couldn't get user name {person.tg_user_id}: {e}")
+                    user_display_name = f"ID {person.tg_user_id}"
+
+                # 📋 Формируем сообщение
+                if tasks:
+                    task_list = "\n".join([f"- {task['name']} (Сложность: {task['complexity']})" for task in tasks])
+                    message = f"👋 {user_display_name}, вот твои задачи на сегодня:\n{task_list}"
+                else:
+                    message = f"🎉 {user_display_name}, у тебя сегодня нет задач!"
+
+                # 📬 Отправляем
+                try:
+                    await context.bot.send_message(chat_id=person.tg_user_id, text=message)
+                    logger.info(f"Tasks have been sent to {user_display_name}")
+                except Exception as e:
+                    logger.error(f"Couldn't send tasks to {person.tg_user_id}: {e}")
+
+                # 📝 Сохраняем историю
+                for task in tasks:
+                    chore = next((c for c in all_chores if c.name == task["name"]), None)
+                    if chore:
+                        history = PreviousAssignment(
+                            person_id=person.id,
+                            chore_id=chore.id,
+                            date=today
+                        )
+                        session.add(history)
+
+            # Сохраняем все изменения в базе данных
+            session.commit()
+
+        except Exception as e:
+            logger.error(f"An error occurred: {e}")
+        finally:
+            session.close()
+
     async def _clear_sent_tasks_job(self, context: ContextTypes.DEFAULT_TYPE):
         logger.info("Clearing table sent_tasks...")
         self.db_client.clear_sent_tasks()
