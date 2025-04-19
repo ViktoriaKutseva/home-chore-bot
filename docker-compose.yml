@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: home_chore_bot
+    container_name: home_chore_bot_v2
     environment:
       - TELEGRAM_BOT_TOKEN
       - DB_URL
