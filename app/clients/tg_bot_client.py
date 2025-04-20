@@ -27,7 +27,7 @@ def add_default_chores(db_client: DBClient):
         Chore(name="Постирать вещи", frequency=Frequency.EVERY_3_DAYS, complexity=Complexity.MEDIUM),
         Chore(name="Собрать мусор", frequency=Frequency.DAILY, complexity=Complexity.EASY),
         Chore(name="Помыть посуду", frequency=Frequency.DAILY, complexity=Complexity.MEDIUM), 
-        Chore(name="Помыть раковину", frequency=Frequency.DAILY, complexity=Complexity.EASY)
+        Chore(name="Помыть раковину", frequency=Frequency.WEEKLY, complexity=Complexity.EASY)
 
     ]   
     for chore in chores:
